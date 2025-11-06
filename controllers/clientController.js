@@ -30,15 +30,28 @@ export const createClient = async (req, res) => {
 // GET all clients
 export const getAllClients = async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT * FROM clients ORDER BY id ASC`
-    );
+    const result = await pool.query(`
+      SELECT 
+        c.id,
+        c.name,
+        c.address,
+        c.state,
+        c.gst_number,
+        c.created_at,
+        c.updated_at,
+        co.name AS company_name
+      FROM clients c
+      LEFT JOIN companies co ON c.company_id = co.id
+      ORDER BY c.id ASC
+    `);
+
     res.status(200).json(result.rows);
   } catch (err) {
     console.error("❌ Error in getAllClients:", err);
     res.status(500).send("Server Error");
   }
 };
+
 
 // GET client by ID
 export const getClientById = async (req, res) => {
