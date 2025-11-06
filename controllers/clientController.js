@@ -39,6 +39,7 @@ export const getAllClients = async (req, res) => {
         c.gst_number,
         c.created_at,
         c.updated_at,
+        c.company_id,
         co.name AS company_name
       FROM clients c
       LEFT JOIN companies co ON c.company_id = co.id
