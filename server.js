@@ -15,6 +15,8 @@ import invoiceRoutes from "./routes/invoiceRoutes.js";
 // ===== Swagger setup (from module) =====
 import { swaggerUi, swaggerSpec } from "./swagger.js";
 
+import { createAdmin, login } from "./auth/authentication.js"
+
 dotenv.config();
 const app = express();
 
@@ -36,6 +38,10 @@ app.use("/api/invoices", invoiceRoutes);
 
 // ===== Swagger Docs =====
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+
+// admin and login
+app.post("/adminLogin", createAdmin);
+app.post("/login", login);
 
 // ===== Health check =====
 app.get("/", (req, res) => res.send("✅ Combined Server is running..."));
