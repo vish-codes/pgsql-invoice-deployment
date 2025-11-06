@@ -44,16 +44,35 @@ export const getAllClients = async (req, res) => {
 export const getClientById = async (req, res) => {
   const { id } = req.params;
   try {
-    const result = await pool.query(`SELECT * FROM clients WHERE id = $1`, [id]);
+    const result = await pool.query(
+      `
+      SELECT 
+        c.id,
+        c.name,
+        c.address,
+        c.state,
+        c.gst_number,
+        c.created_at,
+        c.updated_at,
+        co.name AS company_name
+      FROM clients c
+      LEFT JOIN companies co ON c.company_id = co.id
+      WHERE c.id = $1
+      `,
+      [id]
+    );
+
     if (result.rows.length === 0) {
       return res.status(404).json({ message: "Client not found" });
     }
+
     res.status(200).json(result.rows[0]);
   } catch (err) {
     console.error("❌ Error in getClientById:", err);
     res.status(500).send("Server Error");
   }
 };
+
 
 // UPDATE client
 export const updateClient = async (req, res) => {
