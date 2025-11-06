@@ -116,31 +116,58 @@ export const getInvoiceById = async (req, res) => {
       return res.status(400).json({ message: "❌ Invalid invoice ID provided." });
     }
 
-    const result = await pool.query(
-      `SELECT 
-          i.*,
-          p.name AS project_name,
-          c.name AS client_name,
-          co.name AS company_name,
-          e.name AS employee_name
-       FROM invoices i
-       LEFT JOIN projects p ON i.project_id = p.id
-       LEFT JOIN clients c ON p.client_id = c.id
-       LEFT JOIN companies co ON c.company_id = co.id
-       LEFT JOIN employee e ON p.emp_id = e.id
-       WHERE i.id = $1`,
-      [id]
-    );
+    const query = `
+      SELECT 
+        i.invoice_no,
+        i.issue_date,
+        i.total_amount,
+        i.days,
+        i.paid_leaves,
+        i.unpaid_leaves,
+        i.over_time,
+        p.name AS project_name,
+        e.name AS employee_name,
+        c.id AS client_id,
+        c.name AS client_name,
+        c.address AS client_address,
+        c.state AS client_state,
+        c.gst_number AS client_gst_number,
+        c.created_at AS client_created_at,
+        c.updated_at AS client_updated_at,
+        co.id AS company_id,
+        co.name AS company_name,
+        co.address AS company_address,
+        co.gst_number AS company_gst_number,
+        co.bank_account_number AS company_bank_account_number,
+        co.ifsc_code AS company_ifsc_code,
+        co.pan AS company_pan,
+        co.state AS company_state,
+        co.created_at AS company_created_at
+      FROM invoices i
+      LEFT JOIN projects p ON i.project_id = p.id
+      LEFT JOIN clients c ON p.client_id = c.id
+      LEFT JOIN companies co ON c.company_id = co.id
+      LEFT JOIN employee e ON p.emp_id = e.id
+      WHERE i.id = $1
+    `;
 
-    if (result.rows.length === 0)
+    const result = await pool.query(query, [id]);
+
+    if (result.rows.length === 0) {
       return res.status(404).json({ message: "⚠️ Invoice not found." });
+    }
 
     res.status(200).json(result.rows[0]);
+
   } catch (err) {
     console.error("❌ Error fetching invoice:", err);
-    res.status(500).json({ message: "❌ Failed to fetch invoice details.", error: err.message });
+    res.status(500).json({
+      message: "❌ Failed to fetch invoice details.",
+      error: err.message,
+    });
   }
 };
+
 
 // ✅ Update Invoice
 export const updateInvoice = async (req, res) => {
