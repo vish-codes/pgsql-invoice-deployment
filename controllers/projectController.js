@@ -1,31 +1,46 @@
 import pool from "../connection.js";
 
-// ✅ CREATE project
+/* ============================================================
+   CREATE PROJECT (with employee assignments)
+   ============================================================ */
 export const createProject = async (req, res) => {
-  const { name, client_id, emp_id, billing_amt, active, billing_method, overtime_amt } = req.body;
+  const { 
+    name, 
+    client_id, 
+    emp_ids, 
+    billing_amt, 
+    active, 
+    billing_method, 
+    overtime_amt 
+  } = req.body;
 
-  if (!name || !client_id || !emp_id) {
-    return res
-      .status(400)
-      .json({ message: "❌ 'name', 'client_id', and 'emp_id' are required." });
+  if (!name || !client_id) {
+    return res.status(400).json({
+      message: "❌ 'name' and 'client_id' are required."
+    });
   }
 
-  // Validate billing_method if provided
+  if (!Array.isArray(emp_ids) || emp_ids.length === 0) {
+    return res.status(400).json({
+      message: "❌ 'emp_ids' must be a non-empty array."
+    });
+  }
+
   const validBillingMethods = ["days", "hours", "month"];
   const method = billing_method && validBillingMethods.includes(billing_method)
-      ? billing_method
-      : "days";
+    ? billing_method
+    : "days";
 
   try {
-    const result = await pool.query(
+    // Create project
+    const projectResult = await pool.query(
       `INSERT INTO projects 
-       (name, client_id, emp_id, billing_amt, active, billing_method, overtime_amt)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+        (name, client_id, billing_amt, active, billing_method, overtime_amt)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
       [
         name,
         client_id,
-        emp_id,
         billing_amt || 0,
         active !== undefined ? active : true,
         method,
@@ -33,62 +48,60 @@ export const createProject = async (req, res) => {
       ]
     );
 
+    const project = projectResult.rows[0];
+
+    // Assign employees
+    const assigned = [];
+    for (const emp_id of emp_ids) {
+      const result = await pool.query(
+        `INSERT INTO project_employees (project_id, emp_id)
+         VALUES ($1, $2)
+         ON CONFLICT DO NOTHING
+         RETURNING *`,
+        [project.id, emp_id]
+      );
+
+      if (result.rows[0]) {
+        assigned.push(result.rows[0]);
+      }
+    }
+
     return res.status(201).json({
       message: "✅ Project created successfully",
-      project: result.rows[0],
+      project,
+      assignedEmployees: assigned
     });
+
   } catch (err) {
     console.error("❌ Error in createProject:", err);
 
     if (err.code === "23503") {
       return res.status(400).json({
-        message: "❌ Invalid 'client_id' or 'emp_id' — referenced record not found.",
+        message: "❌ Invalid 'client_id' or one of the 'emp_ids'"
       });
     }
 
-    if (err.code === "23505") {
-      return res.status(400).json({
-        message: "❌ Duplicate entry — a project with similar data already exists.",
-      });
-    }
-
-    if (err.code === "22P02") {
-      return res.status(400).json({
-        message: "❌ Invalid data type provided (e.g., number expected but got text).",
-      });
-    }
-
-    if (err.code === "23514") {
-      return res.status(400).json({
-        message: "❌ Invalid 'billing_method'. Must be 'days', 'hours', or 'month'.",
-      });
-    }
-
-    return res.status(500).json({
+    res.status(500).json({
       message: "❌ Unexpected error while creating project.",
       error: err.message,
     });
   }
 };
 
-// ✅ GET all projects
+/* ============================================================
+   GET ALL PROJECTS (with client name)
+   ============================================================ */
 export const getAllProjects = async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT p.*, c.name AS client_name 
+      `SELECT p.*, 
+              c.name AS client_name
        FROM projects p
        LEFT JOIN clients c ON p.client_id = c.id
        ORDER BY p.id ASC`
     );
 
-    if (result.rows.length === 0) {
-      return res.status(200).json({
-        message: "⚠️ No projects found in the database.",
-        projects: [],
-      });
-    }
-
-    res.status(200).json(result.rows);
+    return res.status(200).json(result.rows);
   } catch (err) {
     console.error("❌ Error in getAllProjects:", err);
     res.status(500).json({
@@ -98,126 +111,173 @@ export const getAllProjects = async (req, res) => {
   }
 };
 
-// ✅ GET project by ID
+/* ============================================================
+   GET PROJECT BY ID (including assigned employees)
+   ============================================================ */
 export const getProjectById = async (req, res) => {
   const { id } = req.params;
 
   if (!id || isNaN(id)) {
-    return res.status(400).json({ message: "❌ Invalid project ID provided." });
+    return res.status(400).json({ message: "❌ Invalid project ID." });
   }
 
   try {
-    const result = await pool.query(`SELECT * FROM projects WHERE id=$1`, [id]);
+    const projectResult = await pool.query(
+      `SELECT * FROM projects WHERE id=$1`,
+      [id]
+    );
 
-    if (result.rows.length === 0) {
+    if (projectResult.rows.length === 0) {
       return res.status(404).json({ message: "⚠️ Project not found." });
     }
 
-    res.status(200).json(result.rows[0]);
+    const employees = await pool.query(
+      `SELECT pe.emp_id, e.name AS emp_name
+       FROM project_employees pe
+       LEFT JOIN employees e ON pe.emp_id = e.emp_id
+       WHERE pe.project_id = $1`,
+      [id]
+    );
+
+    return res.status(200).json({
+      ...projectResult.rows[0],
+      assigned_employees: employees.rows
+    });
+
   } catch (err) {
     console.error("❌ Error in getProjectById:", err);
     res.status(500).json({
-      message: "❌ Failed to fetch project details.",
+      message: "❌ Failed to fetch project.",
       error: err.message,
     });
   }
 };
 
-// ✅ UPDATE project
+/* ============================================================
+   UPDATE PROJECT DETAILS (NOT EMPLOYEES)
+   ============================================================ */
 export const updateProject = async (req, res) => {
-  const { id } = req.params;
-  const { name, client_id, emp_id, billing_amt, active, billing_method, overtime_amt } = req.body;
-
-  if (!id || isNaN(id)) {
-    return res.status(400).json({ message: "❌ Invalid project ID provided." });
-  }
-
-  // Validate billing_method if provided
-  const validBillingMethods = ["days", "hours", "month"];
-  if (billing_method && !validBillingMethods.includes(billing_method)) {
-    return res.status(400).json({
-      message: "❌ Invalid 'billing_method'. Must be one of: 'days', 'hours', 'month'.",
-    });
-  }
-
   try {
-    const result = await pool.query(
-      `UPDATE projects 
-       SET name=$1, client_id=$2, emp_id=$3, billing_amt=$4, active=$5, billing_method=$6, overtime_amt=$7
-       WHERE id=$8 RETURNING *`,
+    const { id } = req.params;  
+    const { 
+      name, 
+      client_id, 
+      emp_ids,        // <-- array of employees
+      billing_amt, 
+      active, 
+      billing_method, 
+      overtime_amt 
+    } = req.body;
+
+    // Validate project exists
+    const existingProject = await pool.query(
+      `SELECT * FROM projects WHERE id = $1`,
+      [id]
+    );
+
+    if (existingProject.rowCount === 0) {
+      return res.status(404).json({ message: "Project not found" });
+    }
+
+    // Update main project table
+    const updatedProject = await pool.query(
+      `UPDATE projects
+       SET name = $1,
+           client_id = $2,
+           billing_amt = $3,
+           active = $4,
+           billing_method = $5,
+           overtime_amt = $6
+       WHERE id = $7
+       RETURNING *`,
       [
-        name,
-        client_id,
-        emp_id,
-        billing_amt || 0,
-        active !== undefined ? active : true,
-        billing_method || "days",
-        overtime_amt || 0,
-        id,
+        name || existingProject.rows[0].name,
+        client_id || existingProject.rows[0].client_id,
+        billing_amt ?? existingProject.rows[0].billing_amt,
+        active ?? existingProject.rows[0].active,
+        billing_method || existingProject.rows[0].billing_method,
+        overtime_amt ?? existingProject.rows[0].overtime_amt,
+        id
       ]
     );
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ message: "⚠️ Project not found." });
+    let assignedEmployees = [];
+
+    /* ------------------------------------------------------------
+       UPDATE PROJECT EMPLOYEES (IF emp_ids PROVIDED)
+    ------------------------------------------------------------ */
+    if (Array.isArray(emp_ids)) {
+
+      // 1️⃣ Remove all previous employees for that project
+      await pool.query(
+        `DELETE FROM project_employees WHERE project_id = $1`,
+        [id]
+      );
+
+      // 2️⃣ Insert new employees
+      for (const emp_id of emp_ids) {
+        const insertQuery = `
+          INSERT INTO project_employees (project_id, emp_id)
+          VALUES ($1, $2)
+          ON CONFLICT DO NOTHING
+          RETURNING *;
+        `;
+        const insertResult = await pool.query(insertQuery, [id, emp_id]);
+
+        if (insertResult.rows[0]) {
+          assignedEmployees.push(insertResult.rows[0]);
+        }
+      }
     }
 
-    res.status(200).json({
-      message: "✅ Project updated successfully",
-      project: result.rows[0],
+    return res.status(200).json({
+      message: "Project updated successfully",
+      project: updatedProject.rows[0],
+      updatedEmployees: assignedEmployees
     });
+
   } catch (err) {
-    console.error("❌ Error in updateProject:", err);
-
-    if (err.code === "23503") {
-      return res.status(400).json({
-        message: "❌ Invalid 'client_id' or 'emp_id' — referenced record not found.",
-      });
-    }
-
-    if (err.code === "22P02") {
-      return res.status(400).json({
-        message: "❌ Invalid data type — please check your input fields.",
-      });
-    }
-
-    if (err.code === "23514") {
-      return res.status(400).json({
-        message: "❌ Invalid 'billing_method'. Must be 'days', 'hours', or 'month'.",
-      });
-    }
-
-    res.status(500).json({
-      message: "❌ Unexpected error while updating project.",
-      error: err.message,
+    console.error("❌ Error updating project:", err);
+    return res.status(500).json({
+      message: "Internal Server Error",
+      error: err.message
     });
   }
 };
-
-// ✅ DELETE project
+/* ============================================================
+   DELETE PROJECT
+   ============================================================ */
 export const deleteProject = async (req, res) => {
   const { id } = req.params;
 
   if (!id || isNaN(id)) {
-    return res.status(400).json({ message: "❌ Invalid project ID provided." });
+    return res.status(400).json({ message: "❌ Invalid project ID." });
   }
 
   try {
-    const result = await pool.query(`DELETE FROM projects WHERE id=$1 RETURNING *`, [id]);
+    // Delete employee links first
+    await pool.query(
+      `DELETE FROM project_employees WHERE project_id=$1`,
+      [id]
+    );
+
+    const result = await pool.query(
+      `DELETE FROM projects WHERE id=$1 RETURNING *`,
+      [id]
+    );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ message: "⚠️ Project not found or already deleted." });
-    }
-
-    res.status(200).json({ message: "✅ Project deleted successfully" });
-  } catch (err) {
-    console.error("❌ Error in deleteProject:", err);
-
-    if (err.code === "23503") {
-      return res.status(400).json({
-        message: "❌ Cannot delete — this project is referenced in another table (foreign key constraint).",
+      return res.status(404).json({
+        message: "⚠️ Project not found or already deleted."
       });
     }
 
+    return res.status(200).json({
+      message: "✅ Project deleted successfully"
+    });
+
+  } catch (err) {
+    console.error("❌ Error in deleteProject:", err);
     res.status(500).json({
       message: "❌ Unexpected error while deleting project.",
       error: err.message,
