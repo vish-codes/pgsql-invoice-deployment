@@ -6,6 +6,7 @@ import {
   updateClient,
   deleteClient,
 } from "../controllers/clientController.js";
+import { getClientFullDetails } from "../controllers/clientDetails.controller.js";
 
 const router = express.Router();
 
@@ -129,6 +130,7 @@ const router = express.Router();
  *       404:
  *         description: Client not found
  */
+router.get("/:clientId/details", getClientFullDetails)
 
 router.post("/", createClient);
 router.get("/", getAllClients);
