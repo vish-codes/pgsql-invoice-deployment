@@ -9,6 +9,9 @@ export const getClientFullDetails = async (req, res) => {
       SELECT 
         p.id AS project_id,
         p.name AS project_name,
+        p.billing_amt,
+        p.billing_method,
+        p.overtime_amt,
         e.id AS employee_id,
         e.name AS employee_name
       FROM projects p
