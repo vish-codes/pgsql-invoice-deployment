@@ -5,24 +5,33 @@ import pool from "../connection.js";
    ============================================================ */
 export const assignEmployeeToProject = async (req, res) => {
   try {
-    const { project_id, emp_ids } = req.body;
+    const { project_id, employees } = req.body;
 
-    if (!project_id || !Array.isArray(emp_ids) || emp_ids.length === 0) {
+    if (!project_id || !Array.isArray(employees) || employees.length === 0) {
       return res.status(400).json({
-        message: "project_id and emp_ids (array) are required",
+        message: "project_id and employees (array) are required",
       });
     }
 
     const insertedRows = [];
 
-    for (const emp_id of emp_ids) {
+    for (const emp of employees) {
+      const { emp_id, project_emp_code } = emp;
+
+      if (!emp_id || !project_emp_code) {
+        return res.status(400).json({
+          message: "Each employee must include emp_id and project_emp_code"
+        });
+      }
+
       const query = `
-        INSERT INTO project_employees (project_id, emp_id)
-        VALUES ($1, $2)
+        INSERT INTO project_employees (project_id, emp_id, project_emp_code)
+        VALUES ($1, $2, $3)
         ON CONFLICT DO NOTHING
         RETURNING *;
       `;
-      const result = await pool.query(query, [project_id, emp_id]);
+
+      const result = await pool.query(query, [project_id, emp_id, project_emp_code]);
 
       if (result.rows[0]) {
         insertedRows.push(result.rows[0]);
@@ -43,6 +52,7 @@ export const assignEmployeeToProject = async (req, res) => {
   }
 };
 
+
 /* ============================================================
    READ — Get All Employees Assigned to a Project
    ============================================================ */
@@ -51,9 +61,9 @@ export const getEmployeesByProject = async (req, res) => {
     const { project_id } = req.params;
 
     const query = `
-      SELECT pe.id, pe.project_id, pe.emp_id, e.emp_name 
+      SELECT pe.id, pe.project_id, pe.emp_id, pe.project_emp_code, e.name AS emp_name
       FROM project_employees pe
-      LEFT JOIN employees e ON pe.emp_id = e.emp_id
+      LEFT JOIN employee e ON pe.emp_id = e.id
       WHERE pe.project_id = $1;
     `;
 
@@ -78,28 +88,26 @@ export const getEmployeesByProject = async (req, res) => {
    ============================================================ */
 export const updateEmployeeAssignment = async (req, res) => {
   try {
-    const { id } = req.params;        // assignment row id
-    const { emp_id } = req.body;
-
-    if (!emp_id) {
-      return res.status(400).json({
-        message: "emp_id is required",
-      });
-    }
+    const { id } = req.params;
+    const { emp_id, project_emp_code } = req.body;
 
     const query = `
       UPDATE project_employees
-      SET emp_id = $1
-      WHERE id = $2
+      SET 
+        emp_id = COALESCE($1, emp_id),
+        project_emp_code = COALESCE($2, project_emp_code)
+      WHERE id = $3
       RETURNING *;
     `;
 
-    const result = await pool.query(query, [emp_id, id]);
+    const result = await pool.query(query, [
+      emp_id || null,
+      project_emp_code || null,
+      id
+    ]);
 
     if (result.rowCount === 0) {
-      return res.status(404).json({
-        message: "Assignment not found",
-      });
+      return res.status(404).json({ message: "Assignment not found" });
     }
 
     return res.status(200).json({
