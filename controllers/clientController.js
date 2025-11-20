@@ -2,8 +2,7 @@ import pool from "../connection.js";
 
 // CREATE client
 export const createClient = async (req, res) => {
-  const { name, address, state, gst_number, company_id } = req.body;
-  console.log("createClient");
+  const { name, address, tax_rate, gst_number, company_id } = req.body;
 
   try {
     if (!company_id) {
@@ -11,10 +10,10 @@ export const createClient = async (req, res) => {
     }
 
     const result = await pool.query(
-      `INSERT INTO clients (name, address, state, gst_number, company_id, created_at, updated_at)
+      `INSERT INTO clients (name, address, tax_rate, gst_number, company_id, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
        RETURNING *`,
-      [name, address, state, gst_number, company_id]
+      [name, address, tax_rate, gst_number, company_id]
     );
 
     res.status(201).json({
@@ -35,7 +34,7 @@ export const getAllClients = async (req, res) => {
         c.id,
         c.name,
         c.address,
-        c.state,
+        c.tax_rate,
         c.gst_number,
         c.created_at,
         c.updated_at,
@@ -64,11 +63,11 @@ export const getClientById = async (req, res) => {
         c.id AS client_id,
         c.name AS client_name,
         c.address AS client_address,
-        c.state AS client_state,
+        c.tax_rate,
         c.gst_number AS client_gst,
         c.created_at,
         c.updated_at,
-        c.company_id,
+        c.company_id,      
         co.name AS company_name,
         co.address AS company_address,
         co.state AS company_state,
@@ -100,15 +99,15 @@ export const getClientById = async (req, res) => {
 // UPDATE client
 export const updateClient = async (req, res) => {
   const { id } = req.params;
-  const { name, address, state, gst_number, company_id } = req.body;
+  const { name, address, tax_rate, gst_number, company_id } = req.body;
 
   try {
     const result = await pool.query(
       `UPDATE clients 
-       SET name = $1, address = $2, state = $3, gst_number = $4, company_id = $5, updated_at = NOW()
+       SET name = $1, address = $2, tax_rate = $3, gst_number = $4, company_id = $5, updated_at = NOW()
        WHERE id = $6 
        RETURNING *`,
-      [name, address, state, gst_number, company_id, id]
+      [name, address, tax_rate, gst_number, company_id, id]
     );
 
     if (result.rows.length === 0) {
