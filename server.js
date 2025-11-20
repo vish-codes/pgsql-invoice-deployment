@@ -12,6 +12,7 @@ import projectRoutes from "./routes/projectRoutes.js";
 import employeeRouter from "./routes/employeeRoutes.js";
 import invoiceRoutes from "./routes/invoiceRoutes.js";
 import projectEmployeesRoutes from "./routes/projectEmployees.routes.js"
+import companyRoutes from "./routes/companyRoutes.js"
 // ===== Swagger setup (from module) =====
 import { swaggerUi, swaggerSpec } from "./swagger.js";
 
@@ -36,6 +37,7 @@ app.use("/api/projects", projectRoutes);
 app.use("/api/employee", employeeRouter);
 app.use("/api/invoices", invoiceRoutes);
 app.use("/api/project-employees", projectEmployeesRoutes);
+app.use("/api/companies", companyRoutes);
 
 // ===== Swagger Docs =====
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
