@@ -2,7 +2,6 @@ import pool from "../connection.js";
 
 /* ============================================================
    ✅ CREATE INVOICE
-   Auto-fetch client_id, company_id, and emp_id via project link
    ============================================================ */
 export const createInvoice = async (req, res) => {
   try {
@@ -14,7 +13,6 @@ export const createInvoice = async (req, res) => {
       });
     }
 
-  
     const result = await pool.query(
       `
       INSERT INTO invoices 
@@ -45,7 +43,9 @@ export const createInvoice = async (req, res) => {
   }
 };
 
-// ✅ Get All Invoices (with project → client → company → employee info)
+/* ============================================================
+   ✅ Get All Invoices
+   ============================================================ */
 export const getAllInvoices = async (req, res) => {
   try {
     const query = `
@@ -59,7 +59,7 @@ export const getAllInvoices = async (req, res) => {
         c.id AS client_id,
         c.name AS client_name,
         c.address AS client_address,
-        c.state AS client_state,
+        c.tax_rate AS client_tax_rate,
         c.gst_number AS client_gst_number,
 
         -- Company
@@ -88,7 +88,9 @@ export const getAllInvoices = async (req, res) => {
   }
 };
 
-// ✅ Get Invoice by ID
+/* ============================================================
+   ✅ Get Invoice by ID
+   ============================================================ */
 export const getInvoiceById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -104,7 +106,7 @@ export const getInvoiceById = async (req, res) => {
         c.id AS client_id,
         c.name AS client_name,
         c.address AS client_address,
-        c.state AS client_state,
+        c.tax_rate AS client_tax_rate,
         c.gst_number AS client_gst_number,
 
         -- Company
@@ -138,13 +140,14 @@ export const getInvoiceById = async (req, res) => {
 };
 
 
-// ✅ Update Invoice
+/* ============================================================
+   ✅ Update Invoice
+   ============================================================ */
 export const updateInvoice = async (req, res) => {
   try {
     const { id } = req.params;
     const { invoice_no, client_id, issue_date, total_amount } = req.body;
 
-    // 🔍 Duplicate check (excluding current invoice ID)
     const duplicateCheck = await pool.query(
       `SELECT id FROM invoices 
        WHERE invoice_no = $1 AND id != $2`,
@@ -187,7 +190,9 @@ export const updateInvoice = async (req, res) => {
   }
 };
 
-// ✅ Delete Invoice
+/* ============================================================
+   ✅ Delete Invoice
+   ============================================================ */
 export const deleteInvoice = async (req, res) => {
   try {
     const { id } = req.params;
@@ -198,9 +203,9 @@ export const deleteInvoice = async (req, res) => {
     );
 
     if (result.rows.length === 0)
-      return res
-        .status(404)
-        .json({ message: "⚠️ Invoice not found or already deleted." });
+      return res.status(404).json({
+        message: "⚠️ Invoice not found or already deleted.",
+      });
 
     res.status(200).json({ message: "🗑️ Invoice deleted successfully." });
   } catch (err) {
