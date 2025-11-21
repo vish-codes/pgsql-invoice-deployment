@@ -82,7 +82,6 @@ export const getEmployeesByProject = async (req, res) => {
     });
   }
 };
-
 /* ============================================================
    UPDATE — Change Employee Assigned to a Project
    ============================================================ */
