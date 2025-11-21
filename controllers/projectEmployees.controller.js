@@ -16,36 +16,22 @@ export const assignEmployeeToProject = async (req, res) => {
     const insertedRows = [];
 
     for (const emp of employees) {
-      const {
-        emp_id,
-        project_emp_code,
-        billing_amt = 0,
-        billing_method = "days",
-        overtime_amt = 0
-      } = emp;
+      const { emp_id, project_emp_code } = emp;
 
       if (!emp_id || !project_emp_code) {
         return res.status(400).json({
-          message: "Each employee must include emp_id and project_emp_code",
+          message: "Each employee must include emp_id and project_emp_code"
         });
       }
 
       const query = `
-        INSERT INTO project_employees 
-        (project_id, emp_id, project_emp_code, billing_amt, billing_method, overtime_amt)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO project_employees (project_id, emp_id, project_emp_code)
+        VALUES ($1, $2, $3)
         ON CONFLICT DO NOTHING
         RETURNING *;
       `;
 
-      const result = await pool.query(query, [
-        project_id,
-        emp_id,
-        project_emp_code,
-        billing_amt,
-        billing_method,
-        overtime_amt,
-      ]);
+      const result = await pool.query(query, [project_id, emp_id, project_emp_code]);
 
       if (result.rows[0]) {
         insertedRows.push(result.rows[0]);
@@ -66,6 +52,7 @@ export const assignEmployeeToProject = async (req, res) => {
   }
 };
 
+
 /* ============================================================
    READ — Get All Employees Assigned to a Project
    ============================================================ */
@@ -74,16 +61,7 @@ export const getEmployeesByProject = async (req, res) => {
     const { project_id } = req.params;
 
     const query = `
-      SELECT 
-        pe.id, 
-        pe.project_id, 
-        pe.emp_id, 
-        pe.project_emp_code,
-        pe.billing_amt,
-        pe.billing_method,
-        pe.overtime_amt,
-        pe.assigned_at,
-        e.name AS emp_name
+      SELECT pe.id, pe.project_id, pe.emp_id, pe.project_emp_code, e.name AS emp_name
       FROM project_employees pe
       LEFT JOIN employee e ON pe.emp_id = e.id
       WHERE pe.project_id = $1;
@@ -111,32 +89,20 @@ export const getEmployeesByProject = async (req, res) => {
 export const updateEmployeeAssignment = async (req, res) => {
   try {
     const { id } = req.params;
-    const {
-      emp_id,
-      project_emp_code,
-      billing_amt,
-      billing_method,
-      overtime_amt
-    } = req.body;
+    const { emp_id, project_emp_code } = req.body;
 
     const query = `
       UPDATE project_employees
       SET 
         emp_id = COALESCE($1, emp_id),
-        project_emp_code = COALESCE($2, project_emp_code),
-        billing_amt = COALESCE($3, billing_amt),
-        billing_method = COALESCE($4, billing_method),
-        overtime_amt = COALESCE($5, overtime_amt)
-      WHERE id = $6
+        project_emp_code = COALESCE($2, project_emp_code)
+      WHERE id = $3
       RETURNING *;
     `;
 
     const result = await pool.query(query, [
-      emp_id ?? null,
-      project_emp_code ?? null,
-      billing_amt ?? null,
-      billing_method ?? null,
-      overtime_amt ?? null,
+      emp_id || null,
+      project_emp_code || null,
       id
     ]);
 
