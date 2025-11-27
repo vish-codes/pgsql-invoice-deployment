@@ -1,135 +1,139 @@
-  import pool from "../connection.js";
+import pool from "../connection.js";
 
-  /* ============================================================
-    CREATE PROJECT (with employee assignments)
-    ============================================================ */
-  export const createProject = async (req, res) => {
-    const { 
-      name, 
-      client_id, 
-      emp_ids, 
-      billing_amt, 
-      active, 
-      billing_method, 
-      overtime_amt 
-    } = req.body;
+/* ============================================================
+   CREATE PROJECT (with employee billing details)
+   ============================================================ */
+export const createProject = async (req, res) => {
+  const {
+    name,
+    client_id,
+    employees,
+  } = req.body;
 
-    if (!name || !client_id) {
-      return res.status(400).json({
-        message: "❌ 'name' and 'client_id' are required."
-      });
-    }
+  if (!name || !client_id) {
+    return res.status(400).json({
+      message: "❌ 'name' and 'client_id' are required."
+    });
+  }
 
-    if (!Array.isArray(emp_ids) || emp_ids.length === 0) {
-      return res.status(400).json({
-        message: "❌ 'emp_ids' must be a non-empty array."
-      });
-    }
+  if (!Array.isArray(employees) || employees.length === 0) {
+    return res.status(400).json({
+      message: "❌ 'employees' must be a non-empty array."
+    });
+  }
 
-    const validBillingMethods = ["days", "hours", "month"];
-    const method = billing_method && validBillingMethods.includes(billing_method)
-      ? billing_method
-      : "days";
+  const client = await pool.connect();
 
-    try {
-      // Create project
-      const projectResult = await pool.query(
-        `INSERT INTO projects 
-          (name, client_id, billing_amt, active, billing_method, overtime_amt)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING *`,
+  try {
+    await client.query("BEGIN");
+
+    // 1️⃣ Insert Project
+    const projectResult = await client.query(
+      `INSERT INTO projects (name, client_id)
+       VALUES ($1, $2)
+       RETURNING *`,
+      [name, client_id]
+    );
+
+    const project = projectResult.rows[0];
+    const assignedEmployees = [];
+
+    // 2️⃣ Insert employee-level billing details
+    for (const emp of employees) {
+      const { 
+        emp_id, 
+        project_emp_code, 
+        billing_amt, 
+        billing_method, 
+        overtime_amt 
+      } = emp;
+
+      const insertEmp = await client.query(
+        `INSERT INTO project_employees 
+          (project_id, emp_id, project_emp_code, billing_amt, billing_method, overtime_amt)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING *`,
         [
-          name,
-          client_id,
+          project.id,
+          emp_id,
+          project_emp_code || null,
           billing_amt || 0,
-          active !== undefined ? active : true,
-          method,
-          overtime_amt || 0,
+          billing_method || "days",
+          overtime_amt || 0
         ]
       );
 
-      const project = projectResult.rows[0];
-
-      // Assign employees
-      const assigned = [];
-      for (const emp_id of emp_ids) {
-        const result = await pool.query(
-          `INSERT INTO project_employees (project_id, emp_id)
-          VALUES ($1, $2)
-          ON CONFLICT DO NOTHING
-          RETURNING *`,
-          [project.id, emp_id]
-        );
-
-        if (result.rows[0]) {
-          assigned.push(result.rows[0]);
-        }
-      }
-
-      return res.status(201).json({
-        message: "✅ Project created successfully",
-        project,
-        assignedEmployees: assigned
-      });
-
-    } catch (err) {
-      console.error("❌ Error in createProject:", err);
-
-      if (err.code === "23503") {
-        return res.status(400).json({
-          message: "❌ Invalid 'client_id' or one of the 'emp_ids'"
-        });
-      }
-
-      res.status(500).json({
-        message: "❌ Unexpected error while creating project.",
-        error: err.message,
-      });
+      assignedEmployees.push(insertEmp.rows[0]);
     }
-  };
 
-  /* ============================================================
-    GET ALL PROJECTS (with client name)
-    ============================================================ */
-  export const getAllProjects = async (req, res) => {
-    try {
-      const result = await pool.query(
-        `
-        SELECT 
-          p.*, 
-          c.name AS client_name,
-          COALESCE(
-            json_agg(
-              json_build_object(
-                'emp_id', e.id,
-                'emp_name', e.name
-              )
-            ) FILTER (WHERE e.id IS NOT NULL), 
-            '[]'
-          ) AS employees
-        FROM projects p
-        LEFT JOIN clients c ON p.client_id = c.id
-        LEFT JOIN project_employees pe ON pe.project_id = p.id
-        LEFT JOIN employee e ON e.id = pe.emp_id
-        GROUP BY p.id, c.name
-        ORDER BY p.id ASC;
-        `
-      );
+    await client.query("COMMIT");
 
-      return res.status(200).json(result.rows);
-    } catch (err) {
-      console.error("❌ Error in getAllProjects:", err);
-      res.status(500).json({
-        message: "❌ Failed to fetch projects.",
-        error: err.message,
-      });
-    }
-  };
+    return res.status(201).json({
+      message: "✅ Project created successfully",
+      project,
+      assignedEmployees
+    });
 
-  /* ============================================================
-    GET PROJECT BY ID (including assigned employees)
-    ============================================================ */
-  export const getProjectById = async (req, res) => {
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("❌ Error in createProject:", err);
+    return res.status(500).json({
+      message: "❌ Unexpected error while creating project.",
+      error: err.message,
+    });
+  } finally {
+    client.release();
+  }
+};
+
+
+/* ============================================================
+   GET ALL PROJECTS (with employees + billing data)
+   ============================================================ */
+export const getAllProjects = async (req, res) => {
+  try {
+    const result = await pool.query(
+      `
+      SELECT 
+        p.*, 
+        c.name AS client_name,
+        COALESCE(
+          json_agg(
+            json_build_object(
+              'id', pe.id,
+              'emp_id', pe.emp_id,
+              'emp_name', e.name,
+              'project_emp_code', pe.project_emp_code,
+              'billing_amt', pe.billing_amt,
+              'billing_method', pe.billing_method,
+              'overtime_amt', pe.overtime_amt
+            )
+          ) FILTER (WHERE pe.emp_id IS NOT NULL),
+          '[]'
+        ) AS employees
+      FROM projects p
+      LEFT JOIN clients c ON p.client_id = c.id
+      LEFT JOIN project_employees pe ON pe.project_id = p.id
+      LEFT JOIN employee e ON e.id = pe.emp_id
+      GROUP BY p.id, c.name
+      ORDER BY p.id ASC;
+      `
+    );
+
+    return res.status(200).json(result.rows);
+  } catch (err) {
+    console.error("❌ Error in getAllProjects:", err);
+    res.status(500).json({
+      message: "❌ Failed to fetch projects.",
+      error: err.message,
+    });
+  }
+};
+
+/* ============================================================
+   GET PROJECT BY ID (with employee billing details)
+   ============================================================ */
+export const getProjectById = async (req, res) => {
   const { id } = req.params;
 
   if (!id || isNaN(id)) {
@@ -142,12 +146,19 @@
       [id]
     );
 
-    if (projectResult.rows.length === 0) {
+    if (projectResult.rowCount === 0) {
       return res.status(404).json({ message: "⚠️ Project not found." });
     }
 
     const employees = await pool.query(
-      `SELECT pe.emp_id AS emp_id, e.name AS emp_name
+      `SELECT 
+          pe.id,
+          pe.emp_id,
+          e.name AS emp_name,
+          pe.project_emp_code,
+          pe.billing_amt,
+          pe.billing_method,
+          pe.overtime_amt
        FROM project_employees pe
        LEFT JOIN employee e ON pe.emp_id = e.id
        WHERE pe.project_id = $1`,
@@ -168,134 +179,135 @@
   }
 };
 
-  /* ============================================================
-    UPDATE PROJECT DETAILS (NOT EMPLOYEES)
-    ============================================================ */
-  export const updateProject = async (req, res) => {
-    try {
-      const { id } = req.params;  
-      const { 
-        name, 
-        client_id, 
-        emp_ids,        // <-- array of employees
-        billing_amt, 
-        active, 
-        billing_method, 
-        overtime_amt 
-      } = req.body;
+/* ============================================================
+   UPDATE PROJECT + EMPLOYEES (billing details)
+   ============================================================ */
+export const updateProject = async (req, res) => {
+  const { id } = req.params;
+  const { name, client_id, employees } = req.body;
 
-      // Validate project exists
-      const existingProject = await pool.query(
-        `SELECT * FROM projects WHERE id = $1`,
+  const client = await pool.connect();
+
+  try {
+    // Validate project exists
+    const existingProject = await client.query(
+      `SELECT * FROM projects WHERE id = $1`,
+      [id]
+    );
+
+    if (existingProject.rowCount === 0) {
+      return res.status(404).json({ message: "❌ Project not found" });
+    }
+    await client.query("BEGIN");
+
+    // Update project table
+    const updatedProject = await client.query(
+      `UPDATE projects
+       SET name = $1,
+           client_id = $2,
+           updated_at = NOW()
+       WHERE id = $3
+       RETURNING *`,
+      [
+        name || existingProject.rows[0].name,
+        client_id || existingProject.rows[0].client_id,
+        id
+      ]
+    );
+
+    let updatedEmployees = [];
+
+    // Update employee assignments if provided
+    if (Array.isArray(employees)) {
+      // Remove old employee records
+      await client.query(
+        `DELETE FROM project_employees WHERE project_id = $1`,
         [id]
       );
 
-      if (existingProject.rowCount === 0) {
-        return res.status(404).json({ message: "Project not found" });
-      }
-
-      // Update main project table
-      const updatedProject = await pool.query(
-        `UPDATE projects
-        SET name = $1,
-            client_id = $2,
-            billing_amt = $3,
-            active = $4,
-            billing_method = $5,
-            overtime_amt = $6
-        WHERE id = $7
-        RETURNING *`,
-        [
-          name || existingProject.rows[0].name,
-          client_id || existingProject.rows[0].client_id,
-          billing_amt ?? existingProject.rows[0].billing_amt,
-          active ?? existingProject.rows[0].active,
-          billing_method || existingProject.rows[0].billing_method,
-          overtime_amt ?? existingProject.rows[0].overtime_amt,
-          id
-        ]
-      );
-
-      let assignedEmployees = [];
-
-      /* ------------------------------------------------------------
-        UPDATE PROJECT EMPLOYEES (IF emp_ids PROVIDED)
-      ------------------------------------------------------------ */
-      if (Array.isArray(emp_ids)) {
-
-        // 1️⃣ Remove all previous employees for that project
-        await pool.query(
-          `DELETE FROM project_employees WHERE project_id = $1`,
-          [id]
+      // Insert new employee records
+      for (const emp of employees) {
+        const {
+          emp_id,
+          project_emp_code,
+          billing_amt,
+          billing_method,
+          overtime_amt
+        } = emp;
+        const insert = await client.query(
+          `INSERT INTO project_employees
+            (project_id, emp_id, project_emp_code, billing_amt, billing_method, overtime_amt)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING *`,
+          [
+            id,
+            emp_id,
+            project_emp_code || null,
+            billing_amt || 0,
+            billing_method || "days",
+            overtime_amt || 0
+          ]
         );
 
-        // 2️⃣ Insert new employees
-        for (const emp_id of emp_ids) {
-          const insertQuery = `
-            INSERT INTO project_employees (project_id, emp_id)
-            VALUES ($1, $2)
-            ON CONFLICT DO NOTHING
-            RETURNING *;
-          `;
-          const insertResult = await pool.query(insertQuery, [id, emp_id]);
-
-          if (insertResult.rows[0]) {
-            assignedEmployees.push(insertResult.rows[0]);
-          }
-        }
+        updatedEmployees.push(insert.rows[0]);
       }
+    }
+    await client.query("COMMIT");
 
-      return res.status(200).json({
-        message: "Project updated successfully",
-        project: updatedProject.rows[0],
-        updatedEmployees: assignedEmployees
-      });
+    return res.status(200).json({
+      message: "Project updated successfully",
+      project: updatedProject.rows[0],
+      updatedEmployees
+    });
 
-    } catch (err) {
-      console.error("❌ Error updating project:", err);
-      return res.status(500).json({
-        message: "Internal Server Error",
-        error: err.message
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("❌ Error updating project:", err);
+    return res.status(500).json({
+      message: "Internal Server Error",
+      error: err.message
+    });
+  } finally {
+    client.release();
+  }
+};
+/* ============================================================
+   DELETE PROJECT
+   ============================================================ */
+export const deleteProject = async (req, res) => {
+  const { id } = req.params;
+
+  if (!id || isNaN(id)) {
+    return res.status(400).json({ message: "❌ Invalid project ID." });
+  }
+
+  try {
+    // Delete employee mappings first (cascade also handles but safe)
+    await pool.query(
+      `DELETE FROM project_employees WHERE project_id=$1`,
+      [id]
+    );
+
+    const result = await pool.query(
+      `DELETE FROM projects WHERE id=$1 RETURNING *`,
+      [id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({
+        message: "⚠️ Project not found or already deleted."
       });
     }
-  };
-  /* ============================================================
-    DELETE PROJECT
-    ============================================================ */
-  export const deleteProject = async (req, res) => {
-    const { id } = req.params;
 
-    if (!id || isNaN(id)) {
-      return res.status(400).json({ message: "❌ Invalid project ID." });
-    }
+    return res.status(200).json({
+      message: "✅ Project deleted successfully"
+    });
 
-    try {
-      // Delete employee links first
-      await pool.query(
-        `DELETE FROM project_employees WHERE project_id=$1`,
-        [id]
-      );
-
-      const result = await pool.query(
-        `DELETE FROM projects WHERE id=$1 RETURNING *`,
-        [id]
-      );
-
-      if (result.rows.length === 0) {
-        return res.status(404).json({
-          message: "⚠️ Project not found or already deleted."
-        });
-      }
-
-      return res.status(200).json({
-        message: "✅ Project deleted successfully"
-      });
-
-    } catch (err) {
-      console.error("❌ Error in deleteProject:", err);
-      res.status(500).json({
-        message: "❌ Unexpected error while deleting project.",
-        error: err.message,
-      });
-    }
-  };
+  } catch (err) {
+    console.error("❌ Error in deleteProject:", err);
+    res.status(500).json({
+      message: "❌ Unexpected error while deleting project.",
+      error: err.message,
+    });
+  }
+};
