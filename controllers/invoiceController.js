@@ -111,7 +111,7 @@ export const getInvoiceById = async (req, res) => {
 
         -- Company
         comp.id AS company_id,
-        comp.name AS company_name,
+        comp.name AS company_name,  
         comp.address AS company_address,
         comp.state AS company_state,
         comp.gst_number AS company_gst_number,
