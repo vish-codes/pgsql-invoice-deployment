@@ -60,22 +60,15 @@ export const getClientById = async (req, res) => {
     const result = await pool.query(
       `
       SELECT 
-        c.id AS client_id,
-        c.name AS client_name,
-        c.address AS client_address,
+        c.id,
+        c.name,
+        c.address,
         c.tax_rate,
-        c.gst_number AS client_gst,
+        c.gst_number,
         c.created_at,
         c.updated_at,
         c.company_id,      
-        co.name AS company_name,
-        co.address AS company_address,
-        co.state AS company_state,
-        co.gst_number AS company_gst_number,
-        co.bank_account_number AS company_bank_account_number,
-        co.ifsc_code AS company_ifsc_code,
-        co.pan AS company_pan
-
+        co.name,
       FROM clients c
       LEFT JOIN companies co ON c.company_id = co.id
       WHERE c.id = $1
